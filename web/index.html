@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'>
+    <title>Dunduk Intelligence</title>
+    <script src='https://cdn.tailwindcss.com'></script>
+    <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+    <script src='https://telegram.org/js/telegram-web-app.js'></script>
+    <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>
+    <style>
+        :root { --bg-base: #000; --bg-panel: #0d0d0d; --border: #222; --text: #fff; --muted: #666; --accent: #ffffff; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-base); color: var(--text); margin: 0; -webkit-font-smoothing: antialiased; }
+        .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .tab-btn { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--muted); padding: 14px 5px; background: none; border-bottom: 2px solid transparent; cursor: pointer; flex: 1; text-align: center; transition: 0.2s; }
+        .tab-btn.active { color: #fff; border-bottom-color: #fff; }
+        .stat-card { padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(145deg, #0d0d0d, #050505); }
+        .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+        .stat-value { font-size: 24px; font-weight: 300; letter-spacing: -0.02em; }
+        .list-item { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .list-item:last-child { border-bottom: none; }
+        .btn { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 10px 16px; border-radius: 4px; cursor: pointer; transition: 0.2s; border: none; }
+        .btn-outline { border: 1px solid var(--border); color: var(--muted); background: none; }
+        .btn-outline:active { background: #fff; color: #000; }
+        .hidden-tab { display: none !important; }
+        .logs-pre { background: #000; color: #888; font-family: 'ui-monospace', monospace; font-size: 11px; padding: 16px; overflow: auto; max-height: 400px; white-space: pre-wrap; line-height: 1.5; }
+        .badge { font-size: 8px; padding: 2px 6px; border-radius: 10px; font-weight: 800; text-transform: uppercase; }
+        .badge-red { background: #fee2e2; color: #991b1b; }
+        .badge-green { background: #dcfce7; color: #166534; }
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <nav class='flex border-b border-[#222] sticky top-0 bg-black z-20'>
+        <button class='tab-btn active' id='btn-dash' onclick="openTab('dash')">Dash</button>
+        <button class='tab-btn' id='btn-net' onclick="openTab('net')">Network</button>
+        <button class='tab-btn' id='btn-sec' onclick="openTab('sec')">Threats</button>
+        <button class='tab-btn' id='btn-users' onclick="openTab('users')">Users</button>
+        <button class='tab-btn' id='btn-sys' onclick="openTab('sys')">Sys</button>
+    </nav>
+
+    <main class='p-4 space-y-4 pb-24 max-w-2xl mx-auto'>
+        <section id='tab-dash' class='space-y-4'>
+            <div class='grid grid-cols-2 gap-3'>
+                <div class='stat-card'><div class='stat-label'>CPU Load</div><div class='stat-value' id='val-cpu'>--%</div></div>
+                <div class='stat-card'><div class='stat-label'>Memory</div><div class='stat-value' id='val-ram'>--%</div></div>
+            </div>
+            <div class='panel p-4 h-48'><canvas id='mainChart'></canvas></div>
+            <div class='panel p-4 flex justify-between items-center bg-zinc-900/30'>
+                <div><div class='stat-label'>Status</div><div id='val-status' class='text-xs font-bold'>INITIALIZING</div></div>
+                <button class='btn btn-outline border-zinc-700' onclick="doAction('toggle_cancel')">Toggle Event</button>
+            </div>
+        </section>
+
+        <section id='tab-net' class='hidden-tab space-y-4'>
+            <div class='panel p-4 h-64'><canvas id='portsChart'></canvas></div>
+            <div class='stat-label px-1'>Active Services Details</div>
+            <div class='panel' id='ports-table'></div>
+        </section>
+
+        <section id='tab-sec' class='hidden-tab space-y-4'>
+            <div class='stat-label px-1'>Recent Intrusion Attempts</div>
+            <div class='panel' id='attack-list'></div>
+        </section>
+
+        <section id='tab-users' class='hidden-tab space-y-4'>
+            <div class='panel' id='user-list'></div>
+        </section>
+
+        <section id='tab-sys' class='hidden-tab space-y-4'>
+            <div class='panel p-5 space-y-6'>
+                <div><label class='stat-label block mb-2'>Location</label><input type='text' id='inp-location' onchange="save('set_location', 'inp-location')" placeholder='e.g. Mansarda'></div>
+                <div><label class='stat-label block mb-2'>Schedule</label><input type='text' id='inp-schedule' onchange="save('set_schedule', 'inp-schedule')" placeholder='0010011'></div>
+            </div>
+            <div class='grid grid-cols-2 gap-2'>
+                <button class='btn btn-outline text-red-500 border-red-900/20' onclick="doAction('restart_bot')">Restart Core</button>
+                <button class='btn btn-white' onclick="loadLogs()">Fetch Logs</button>
+            </div>
+            <div class='panel'><pre class='logs-pre' id='log-view'>Ready for inspection.</pre></div>
+        </section>
+    </main>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready(); tg.expand();
+        tg.setHeaderColor('#000000'); tg.setBackgroundColor('#000000');
+
+        function getAuth() {
+            const p = new URLSearchParams(window.location.search);
+            return '?token=' + (p.get('token')||'') + '&initData=' + encodeURIComponent(tg.initData||'');
+        }
+
+        let mainChart, portsChart;
+        function initCharts() {
+            mainChart = new Chart(document.getElementById('mainChart'), {
+                type: 'line',
+                data: { labels: Array(20).fill(''), datasets: [{ borderColor: '#fff', borderWidth: 2, data: Array(20).fill(0), tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(255,255,255,0.03)' }] },
+                options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, scales: { y: { beginAtZero: true, max: 100, display: false }, x: { display: false } }, plugins: { legend: { display: false } } }
+            });
+
+            portsChart = new Chart(document.getElementById('portsChart'), {
+                type: 'bar',
+                data: { labels: [], datasets: [
+                    { label: 'Connections', backgroundColor: '#ffffff', borderRadius: 4, data: [] },
+                    { label: 'Unique IPs', backgroundColor: '#333333', borderRadius: 4, data: [] }
+                ]},
+                options: { 
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { 
+                        y: { beginAtZero: true, grid: { color: '#111' }, ticks: { color: '#444', font: { size: 9 } } }, 
+                        x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10, weight: 'bold' } } } 
+                    },
+                    plugins: { legend: { display: true, position: 'top', align: 'end', labels: { color: '#666', boxWidth: 8, font: { size: 10 } } } }
+                }
+            });
+        }
+
+        function openTab(id) {
+            ['dash', 'net', 'sec', 'users', 'sys'].forEach(t => { 
+                document.getElementById('tab-' + t).classList.toggle('hidden-tab', t !== id); 
+                document.getElementById('btn-' + t).classList.toggle('active', t === id); 
+            });
+            tg.HapticFeedback.impactOccurred('light');
+        }
+
+        async function refresh() {
+            try {
+                const r = await fetch('/api/data' + getAuth());
+                if (!r.ok) return;
+                const d = await r.json();
+                
+                document.getElementById('val-cpu').innerText = d.stats.cpu + '%';
+                document.getElementById('val-ram').innerText = d.stats.ram + '%';
+                mainChart.data.datasets[0].data.shift();
+                mainChart.data.datasets[0].data.push(d.stats.cpu);
+                mainChart.update();
+
+                if (d.ports) {
+                    portsChart.data.labels = d.ports.map(p => p.port + (p.name !== 'unknown' ? ' ' + p.name.toUpperCase() : ''));
+                    portsChart.data.datasets[0].data = d.ports.map(p => p.conns);
+                    portsChart.data.datasets[1].data = d.ports.map(p => p.ips);
+                    portsChart.update();
+
+                    document.getElementById('ports-table').innerHTML = d.ports.map(p => `
+                        <div class='list-item'>
+                            <div>
+                                <div class='text-[13px] font-bold tracking-tight'>${p.name.toUpperCase()}</div>
+                                <div class='text-[10px] text-zinc-500 font-mono'>PORT ${p.port}</div>
+                            </div>
+                            <div class='text-right'>
+                                <div class='text-[15px] font-light'>${p.conns} <span class='text-[9px] text-zinc-600 font-bold'>ACTIVE</span></div>
+                                <div class='text-[10px] text-zinc-500'>${p.ips} UNIQUE IPs</div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                document.getElementById('val-status').innerHTML = d.config.is_cancelled ? '<span class="text-red-500">EVENT CANCELLED</span>' : '<span class="text-green-500">SYSTEM NOMINAL</span>';
+
+                if (document.activeElement.tagName !== 'INPUT') {
+                    document.getElementById('inp-location').value = d.config.location;
+                    document.getElementById('inp-schedule').value = d.config.schedule;
+                }
+
+                document.getElementById('user-list').innerHTML = d.participants.map(u => `
+                    <div class='list-item'>
+                        <span class='text-[14px] ${u.is_dunduk ? 'font-bold text-white' : 'text-zinc-400'}' onclick="tg.openTelegramLink('https://t.me/' + '${u.username}'.replace('@',''))">${u.username}</span>
+                        <button class='btn btn-outline py-1 px-3' onclick="doAction('toggle_dunduk', '${u.username}')">${u.is_dunduk ? '🤡' : '👤'}</button>
+                    </div>
+                `).join('') || '<div class="p-10 text-center text-zinc-700">NO ACTIVE PARTICIPANTS</div>';
+
+                document.getElementById('attack-list').innerHTML = d.attacks.map(a => `
+                    <div class='list-item'>
+                        <div class='flex flex-col'>
+                            <span class='text-[13px] font-mono tracking-tight'>${a.ip}</span>
+                            <span class='text-[9px] text-zinc-600 font-bold uppercase'>${a.last_attack}</span>
+                        </div>
+                        <span class='badge ${a.count > 20 ? 'badge-red' : 'badge-green'}'>${a.count} HITS</span>
+                    </div>
+                `).join('') || '<div class="p-10 text-center text-zinc-800 uppercase italic text-xs">No threats detected</div>';
+
+            } catch(e) { console.error('Refresh error:', e); }
+        }
+
+        async function doAction(a, v) {
+            await fetch('/api/action' + getAuth(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: a, value: v || null }) });
+            tg.HapticFeedback.notificationOccurred('success');
+            refresh();
+        }
+
+        function save(a, id) { doAction(a, document.getElementById(id).value); }
+
+        async function loadLogs() {
+            document.getElementById('log-view').innerText = 'Downloading logs...';
+            const r = await fetch('/api/action' + getAuth(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_logs' }) });
+            const d = await r.json();
+            document.getElementById('log-view').innerText = d.logs || 'No logs available.';
+        }
+
+        initCharts(); refresh(); setInterval(refresh, 4000);
+    </script>
+</body>
+</html>
